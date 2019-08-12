@@ -627,7 +627,7 @@ public abstract class FastDAO<E extends FastEntity> {
         }
     }
 
-    private String getRevMapping(String columnName) {
+    protected final String getRevMapping(String columnName) {
         if (revMapping.containsKey(columnName)) {
             return revMapping.get(columnName);
         }
@@ -635,7 +635,7 @@ public abstract class FastDAO<E extends FastEntity> {
         return columnName;
     }
 
-    private String getFwMapping(String fieldName) {
+    protected final String getFwMapping(String fieldName) {
         if (fwMapping.containsKey(fieldName)) {
             return fwMapping.get(fieldName);
         }
@@ -643,7 +643,7 @@ public abstract class FastDAO<E extends FastEntity> {
         return fieldName;
     }
 
-    private void setObject(PreparedStatement s, int i, Object a) throws SQLException {
+    protected final void setObject(PreparedStatement s, int i, Object a) throws SQLException {
         if (a instanceof FastEntity) {
             s.setObject(i, ((FastEntity) a).getId());
             return;
@@ -662,7 +662,7 @@ public abstract class FastDAO<E extends FastEntity> {
         s.setObject(i, a);
     }
 
-    private Object convertToStore(Field field, Object object) throws Exception {
+    protected final Object convertToStore(Field field, Object object) throws Exception {
         Object fieldValue = field.get(object);
         if (columns.containsKey(field)) {
             return columns.get(field).store().newInstance().store(ds.getConnection(), fieldValue);
@@ -671,7 +671,7 @@ public abstract class FastDAO<E extends FastEntity> {
         return fieldValue;
     }
 
-    private Object convertFromRetrieve(Field field, Object object, Object dbValue) throws Exception {
+    protected final Object convertFromRetrieve(Field field, Object object, Object dbValue) throws Exception {
         Object value = dbValue;
         if (columns.containsKey(field)) {
             value = columns.get(field).retrieve().newInstance().retrieve(dbValue);
@@ -681,7 +681,7 @@ public abstract class FastDAO<E extends FastEntity> {
         return value;
     }
 
-    private void closeStatement(Statement stmt) {
+    protected final void closeStatement(Statement stmt) {
         if (stmt != null) {
             try {
                 if (!stmt.isClosed()) {
@@ -693,7 +693,7 @@ public abstract class FastDAO<E extends FastEntity> {
         }
     }
 
-    private void closeConnection(Connection con) {
+    protected final void closeConnection(Connection con) {
         if (con != null) {
             try {
                 if (!con.isClosed()) {
@@ -705,7 +705,7 @@ public abstract class FastDAO<E extends FastEntity> {
         }
     }
 
-    private void closeResultSet(ResultSet rs) {
+    protected final void closeResultSet(ResultSet rs) {
         if (rs != null) {
             try {
                 if (!rs.isClosed()) {

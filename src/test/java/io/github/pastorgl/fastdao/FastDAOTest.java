@@ -11,8 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class FastDAOTest {
 
@@ -40,10 +39,16 @@ public class FastDAOTest {
 
         Long id = (Long)underTest.insert(one);
 
-        TestEntity _one = underTest.getByPK(id);
+        TestEntity created = underTest.getByPK(id);
 
         one.setId(id);
-        assertTrue(one.equals(_one));
+        assertEquals(one, created);
+
+        one.setVarchar("new string");
+        underTest.update(one);
+
+        TestEntity updated = underTest.getByPK(id);
+        assertEquals(one, updated);
 
         underTest.deleteByPK(id);
 

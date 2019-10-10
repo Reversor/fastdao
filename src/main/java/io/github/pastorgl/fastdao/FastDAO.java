@@ -674,7 +674,9 @@ public abstract class FastDAO<E extends FastEntity> {
         return value;
     }
 
-    protected abstract Transaction getTransaction();
+    protected Transaction getTransaction() {
+        return null;
+    }
 
     public abstract class Transaction implements AutoCloseable {
         private Connection connection;
@@ -705,7 +707,7 @@ public abstract class FastDAO<E extends FastEntity> {
             return null;
         }
 
-         protected void insert(List<E> objects) {
+        protected void insert(List<E> objects) {
         }
 
         protected Object insert(E object) {

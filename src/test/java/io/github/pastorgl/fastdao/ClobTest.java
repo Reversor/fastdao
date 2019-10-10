@@ -21,7 +21,6 @@ public class ClobTest {
     }
 
     private static class TestDao extends FastDAO<TestEntity> {
-
     }
 
     private static class TestEntity extends FastEntity {

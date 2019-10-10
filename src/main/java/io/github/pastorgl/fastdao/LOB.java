@@ -7,5 +7,12 @@ import java.lang.annotation.Target;
 
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
-public @interface CLOB {
+public @interface LOB {
+
+    LobType type();
+
+    enum LobType {
+        BLOB,
+        CLOB
+    }
 }

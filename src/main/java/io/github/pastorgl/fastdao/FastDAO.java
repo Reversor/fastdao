@@ -1,24 +1,35 @@
 package io.github.pastorgl.fastdao;
 
-import javax.sql.DataSource;
 import java.io.InputStream;
 import java.io.Reader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.sql.DataSource;
 
 /**
- * Abstract low-level DAO designed for bulk/batch operations.
- * Implementations must specify concrete {@link FastEntity} subclass as type parameter.
+ * Abstract low-level DAO designed for bulk/batch operations. Implementations must specify concrete
+ * {@link FastEntity} subclass as type parameter.
  *
  * @param <E> {@link FastEntity} subclass
  */
 public abstract class FastDAO<E extends FastEntity> {
+
     static private int batchSize = 500;
     static private DataSource ds;
     /**
@@ -55,8 +66,8 @@ public abstract class FastDAO<E extends FastEntity> {
     private String updateQuery;
 
     {
-        persistentClass = (Class<E>) ((ParameterizedType) getClass()
-                .getGenericSuperclass()).getActualTypeArguments()[0];
+        persistentClass = (Class<E>) ((ParameterizedType) getClass().getGenericSuperclass())
+                .getActualTypeArguments()[0];
 
         if (persistentClass.isAnnotationPresent(Table.class)) {
             tableName = persistentClass.getAnnotation(Table.class).value();
@@ -109,10 +120,10 @@ public abstract class FastDAO<E extends FastEntity> {
     /**
      * Call SELECT that returns a lizt of &lt;E&gt; instances
      *
-     * @param query any SQL Query whose result is a list of &lt;E&gt;, optionally with ? for replaceable parameters.
-     *              Use backslash to escape question marks
-     * @param args  objects, whose values will be used as source of replaceable parameters. If object is an array or
-     *              {@link List}, it'll be unfolded
+     * @param query any SQL Query whose result is a list of &lt;E&gt;, optionally with ? for
+     * replaceable parameters. Use backslash to escape question marks
+     * @param args objects, whose values will be used as source of replaceable parameters. If object
+     * is an array or {@link List}, it'll be unfolded
      * @return list of &lt;E&gt;
      */
     protected List<E> select(String query, Object... args) {
@@ -129,7 +140,8 @@ public abstract class FastDAO<E extends FastEntity> {
                     do {
                         q = query.indexOf('?', r);
                         if (q < 0) {
-                            throw new IllegalArgumentException("supplied query and replaceable arguments don't match");
+                            throw new IllegalArgumentException(
+                                    "supplied query and replaceable arguments don't match");
                         }
                         if ((q > 0) && (query.charAt(q - 1) == '\\')) {
                             r = q + 1;
@@ -323,7 +335,8 @@ public abstract class FastDAO<E extends FastEntity> {
             Object key;
             Field keyField;
             try (Connection con = ds.getConnection()) {
-                try (PreparedStatement ps = con.prepareStatement(sb.toString(), PreparedStatement.RETURN_GENERATED_KEYS)) {
+                try (PreparedStatement ps = con
+                        .prepareStatement(sb.toString(), PreparedStatement.RETURN_GENERATED_KEYS)) {
                     k = 1;
                     key = null;
                     keyField = null;
@@ -384,9 +397,7 @@ public abstract class FastDAO<E extends FastEntity> {
     }
 
     private void batchUpdate(Connection con, List<E> objects) throws Exception {
-        try (PreparedStatement ps = con.prepareStatement(updateQuery)) {
-            String updateQuery = getUpdateQuery();
-
+        try (PreparedStatement ps = con.prepareStatement(getUpdateQuery())) {
             int b = 0;
             for (int i = 0; i < objects.size(); i++, b++) {
                 Object object = objects.get(i);
@@ -418,8 +429,6 @@ public abstract class FastDAO<E extends FastEntity> {
      */
     protected void update(E object) {
         try {
-            String updateQuery = getUpdateQuery();
-
             try (Connection con = ds.getConnection()) {
                 singleUpdate(con, object);
             }
@@ -429,8 +438,7 @@ public abstract class FastDAO<E extends FastEntity> {
     }
 
     private void singleUpdate(Connection connection, E object) throws Exception {
-        try (PreparedStatement ps = connection.prepareStatement(updateQuery)) {
-
+        try (PreparedStatement ps = connection.prepareStatement(getUpdateQuery())) {
             int k = 1;
             for (Field field : fields.values()) {
                 if (!getFwMapping(field.getName()).equals(pkName)) {
@@ -444,7 +452,7 @@ public abstract class FastDAO<E extends FastEntity> {
     }
 
     /**
-     * Generate update query for &lt;E&gt objects
+     * Return update query for &lt;E&gt; objects
      *
      * @return update query
      */
@@ -535,7 +543,8 @@ public abstract class FastDAO<E extends FastEntity> {
             Field key = fields.get(getRevMapping(pkName));
 
             Connection con = ds.getConnection();
-            PreparedStatement ps = con.prepareStatement("DELETE FROM " + tableName + " WHERE " + pkName + "=?");
+            PreparedStatement ps = con
+                    .prepareStatement("DELETE FROM " + tableName + " WHERE " + pkName + "=?");
             setObject(ps, 1, convertToStore(key, object));
 
             ps.executeUpdate();
@@ -582,8 +591,8 @@ public abstract class FastDAO<E extends FastEntity> {
         Class<?> type = fields.get(getRevMapping(pkName)).getType();
         if (!type.isInstance(pk)) {
             throw new FastDAOException("delete - single", new IllegalArgumentException(
-                    "Unexpected primary key type. Expected: " + type.getCanonicalName() + " but passed is: " + pk.getClass()
-                            .getCanonicalName()));
+                    "Unexpected primary key type. Expected: " + type.getCanonicalName()
+                            + " but passed is: " + pk.getClass().getCanonicalName()));
         }
 
         try {
@@ -660,11 +669,11 @@ public abstract class FastDAO<E extends FastEntity> {
             return columns.get(field).store().newInstance().store(ds.getConnection(), fieldValue);
         }
 
-
         return fieldValue;
     }
 
-    private Object convertFromRetrieve(Field field, Object object, Object dbValue) throws Exception {
+    private Object convertFromRetrieve(Field field, Object object, Object dbValue)
+            throws Exception {
         Object value = dbValue;
         if (columns.containsKey(field)) {
             value = columns.get(field).retrieve().newInstance().retrieve(dbValue);
@@ -679,6 +688,7 @@ public abstract class FastDAO<E extends FastEntity> {
     }
 
     public abstract class Transaction implements AutoCloseable {
+
         private Connection connection;
         private boolean rollbackNeeded = false;
 

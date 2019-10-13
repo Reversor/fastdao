@@ -5,6 +5,8 @@ import java.io.Reader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
+import java.sql.Blob;
+import java.sql.Clob;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -64,6 +66,11 @@ public abstract class FastDAO<E extends FastEntity> {
      * Persistent update query
      */
     private String updateQuery;
+    /**
+     * Persistent update query
+     */
+    private String columnsAsString;
+
 
     {
         persistentClass = (Class<E>) ((ParameterizedType) getClass().getGenericSuperclass())
@@ -231,28 +238,11 @@ public abstract class FastDAO<E extends FastEntity> {
         }
 
         try {
-            StringBuilder sb = new StringBuilder("INSERT INTO " + tableName + " (");
+            StringBuilder sb = new StringBuilder("INSERT INTO " + tableName + " (")
+                    .append(getColumnsAsString())
+                    .append(") VALUES (");
 
-            StringBuilder columns = new StringBuilder();
-            int k = 0;
-            for (Field f : fields.values()) {
-                String colName = getFwMapping(f.getName());
-                if (!pkName.equals(colName)) {
-                    if (k++ > 0) {
-                        sb.append(",");
-                    }
-                    columns.append(colName);
-                }
-            }
-
-            sb.append(columns);
-
-            sb.append(") VALUES ");
-            int length = fields.size();
-            int size = objects.size();
-
-            sb.append("(");
-            for (int j = 1; j < length; j++) {
+            for (int j = 1; j < fields.size(); j++) {
                 if (j > 1) {
                     sb.append(",");
                 }
@@ -263,8 +253,8 @@ public abstract class FastDAO<E extends FastEntity> {
             try (Connection con = ds.getConnection()) {
                 try (PreparedStatement ps = con.prepareStatement(sb.toString())) {
                     int b = 0;
-                    for (int i = 0; i < size; i++, b++) {
-                        k = 1;
+                    for (int i = 0; i < objects.size(); i++, b++) {
+                        int k = 1;
                         Object o = objects.get(i);
                         for (Field field : fields.values()) {
                             if (!pkName.equals(getFwMapping(field.getName()))) {
@@ -387,10 +377,8 @@ public abstract class FastDAO<E extends FastEntity> {
             return;
         }
 
-        try {
-            try (Connection con = ds.getConnection()) {
-                batchUpdate(con, objects);
-            }
+        try (Connection con = ds.getConnection()) {
+            batchUpdate(con, objects);
         } catch (Exception e) {
             throw new FastDAOException("update - batch", e);
         }
@@ -461,31 +449,43 @@ public abstract class FastDAO<E extends FastEntity> {
             return updateQuery;
         }
 
-        StringBuilder sb = new StringBuilder("UPDATE " + tableName + " SET (");
+        StringBuilder query = new StringBuilder("UPDATE " + tableName + " SET (")
+                .append(getColumnsAsString())
+                .append(") = (");
 
-        int length = fields.size();
+        for (int j = 1; j < fields.size(); j++) {
+            if (j > 1) {
+                query.append(",");
+            }
+            query.append("?");
+        }
+        query.append(") WHERE ").append(pkName).append("=?");
+
+        return updateQuery = query.toString();
+    }
+
+    /**
+     * Return comma separated columns names for queries
+     *
+     * @return comma separated columns names
+     */
+    private String getColumnsAsString() {
+        if (columnsAsString != null) {
+            return columnsAsString;
+        }
+
+        StringBuilder columns = new StringBuilder();
         int k = 0;
         for (Field f : fields.values()) {
             String colName = getFwMapping(f.getName());
-            if (!colName.equals(pkName)) {
+            if (!pkName.equals(colName)) {
                 if (k++ > 0) {
-                    sb.append(",");
+                    columns.append(",");
                 }
-                sb.append(colName);
+                columns.append(colName);
             }
         }
-
-        sb.append(") = (");
-
-        for (int j = 1; j < length; j++) {
-            if (j > 1) {
-                sb.append(",");
-            }
-            sb.append("?");
-        }
-        sb.append(") WHERE ").append(pkName).append("=?");
-
-        return updateQuery = sb.toString();
+        return columnsAsString = columns.toString();
     }
 
     /**
@@ -597,7 +597,8 @@ public abstract class FastDAO<E extends FastEntity> {
 
         try {
             try (Connection con = ds.getConnection()) {
-                try (PreparedStatement ps = con.prepareStatement("DELETE FROM " + tableName + " WHERE " + pkName + "=?")) {
+                try (PreparedStatement ps = con
+                        .prepareStatement("DELETE FROM " + tableName + " WHERE " + pkName + "=?")) {
                     setObject(ps, 1, pk);
 
                     ps.executeUpdate();
@@ -656,8 +657,16 @@ public abstract class FastDAO<E extends FastEntity> {
             s.setCharacterStream(i, (Reader) a);
         }
 
+        if (a instanceof Clob) {
+            s.setClob(i, (Clob) a);
+        }
+
         if (a instanceof InputStream) {
             s.setBinaryStream(i, (InputStream) a);
+        }
+
+        if (a instanceof Blob) {
+            s.setBlob(i, (Blob) a);
         }
 
         s.setObject(i, a);
@@ -666,7 +675,8 @@ public abstract class FastDAO<E extends FastEntity> {
     private Object convertToStore(Field field, Object object) throws Exception {
         Object fieldValue = field.get(object);
         if (columns.containsKey(field)) {
-            return columns.get(field).store().newInstance().store(ds.getConnection(), fieldValue);
+            return columns.get(field).store().getDeclaredConstructor()
+                    .newInstance().store(ds.getConnection(), fieldValue);
         }
 
         return fieldValue;
@@ -676,14 +686,18 @@ public abstract class FastDAO<E extends FastEntity> {
             throws Exception {
         Object value = dbValue;
         if (columns.containsKey(field)) {
-            value = columns.get(field).retrieve().newInstance().retrieve(dbValue);
+            value = columns.get(field).retrieve().getDeclaredConstructor()
+                    .newInstance().retrieve(dbValue);
         }
 
         field.set(object, value);
         return value;
     }
 
-    protected Transaction getTransaction() {
+    /**
+     * Return new transaction object. Need to implement by overriding
+     */
+    protected Transaction getTransaction() throws SQLException {
         return null;
     }
 
@@ -697,6 +711,40 @@ public abstract class FastDAO<E extends FastEntity> {
             connection.setAutoCommit(false);
         }
 
+        protected List<E> select(String query, Object... args) {
+            try {
+                //TODO
+                return Collections.emptyList();
+            } catch (Exception e) {
+                throw new FastDAOException("transaction select", e);
+            }
+        }
+
+        protected void insert(List<E> objects) {
+            try {
+                //TODO
+            } catch (Exception e) {
+                throw new FastDAOException("transaction insert - batch", e);
+            }
+        }
+
+        protected Object insert(E object) {
+            try {
+                //TODO
+                return null;
+            } catch (Exception e) {
+                throw new FastDAOException("transaction insert - single", e);
+            }
+        }
+
+        protected void update(List<E> enitities) {
+            try {
+                FastDAO.this.batchUpdate(connection, enitities);
+            } catch (Exception e) {
+                throw new FastDAOException("transaction update - batch", e);
+            }
+        }
+
         protected void update(E entity) {
             try {
                 FastDAO.this.singleUpdate(connection, entity);
@@ -705,47 +753,40 @@ public abstract class FastDAO<E extends FastEntity> {
             }
         }
 
-        protected void update(List<E> enitities) {
+        protected void delete(List<E> objects) {
             try {
-                FastDAO.this.batchUpdate(connection, enitities);
+                //TODO
             } catch (Exception e) {
-                e.printStackTrace();
+                throw new FastDAOException("transaction delete - list", e);
             }
         }
 
-        protected List<E> select(String query, Object... args) {
-            return null;
-        }
-
-        protected void insert(List<E> objects) {
-        }
-
-        protected Object insert(E object) {
-            return null;
-        }
-
-        protected void delete(List<E> objects) {
-        }
-
         protected void delete(E object) {
+            try {
+                //TODO
+            } catch (Exception e) {
+                throw new FastDAOException("transaction delete - single", e);
+            }
         }
 
         protected List<E> getAll() {
-            return null;
+            //TODO
+            return Collections.emptyList();
         }
 
         protected E getByPK(Object pk) {
+            //TODO
             return null;
         }
 
         protected void deleteByPK(Object pk) {
+            try {
+            } catch (Exception e) {
+                throw new FastDAOException("transaction delete - single", e);
+            }
         }
 
-        protected final Transaction getTransaction() {
-            return this;
-        }
-
-        public void commit() {
+        public final void commit() {
             try {
                 connection.commit();
             } catch (SQLException e) {

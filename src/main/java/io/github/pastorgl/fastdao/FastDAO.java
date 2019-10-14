@@ -1,28 +1,16 @@
 package io.github.pastorgl.fastdao;
 
+import javax.sql.DataSource;
 import java.io.InputStream;
 import java.io.Reader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
-import java.sql.Blob;
-import java.sql.Clob;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
-import java.sql.Time;
-import java.sql.Timestamp;
+import java.sql.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import javax.sql.DataSource;
+import java.util.*;
 
 /**
  * Abstract low-level DAO designed for bulk/batch operations. Implementations must specify concrete
@@ -55,6 +43,10 @@ public abstract class FastDAO<E extends FastEntity> {
      */
     private Map<String, String> revMapping = new HashMap<>();
     /**
+     * Persistent primary key field
+     */
+    private Field pkField;
+    /**
      * Persistent class fields cache
      */
     private Map<String, Field> fields = new HashMap<>();
@@ -82,11 +74,25 @@ public abstract class FastDAO<E extends FastEntity> {
             tableName = persistentClass.getSimpleName();
         }
 
+        //TODO
         for (Field field : persistentClass.getDeclaredFields()) {
             if ((field.getModifiers() & Modifier.STATIC) == 0) {
                 field.setAccessible(true);
-                String fieldName = field.getName();
 
+                if (field.isAnnotationPresent(PK.class)) {
+                    pkField = field;
+                    String column;
+                    if (field.isAnnotationPresent(Column.class)) {
+                        column = field.getAnnotation(Column.class).value();
+                        revMapping.put(pkName, field.getName());
+                        fwMapping.put(field.getName(), pkName);
+                    } else {
+                        column = tableName + "_id";
+                    }
+                    pkName = column;
+                }
+
+                String fieldName = field.getName();
                 fields.put(fieldName, field);
 
                 String columnName;
@@ -97,12 +103,6 @@ public abstract class FastDAO<E extends FastEntity> {
                     fwMapping.put(fieldName, columnName);
 
                     columns.put(field, column);
-                } else {
-                    columnName = fieldName;
-                }
-
-                if (field.isAnnotationPresent(PK.class)) {
-                    pkName = columnName;
                 }
             }
         }
@@ -128,9 +128,9 @@ public abstract class FastDAO<E extends FastEntity> {
      * Call SELECT that returns a lizt of &lt;E&gt; instances
      *
      * @param query any SQL Query whose result is a list of &lt;E&gt;, optionally with ? for
-     * replaceable parameters. Use backslash to escape question marks
-     * @param args objects, whose values will be used as source of replaceable parameters. If object
-     * is an array or {@link List}, it'll be unfolded
+     *              replaceable parameters. Use backslash to escape question marks
+     * @param args  objects, whose values will be used as source of replaceable parameters. If object
+     *              is an array or {@link List}, it'll be unfolded
      * @return list of &lt;E&gt;
      */
     protected List<E> select(String query, Object... args) {
@@ -240,15 +240,9 @@ public abstract class FastDAO<E extends FastEntity> {
         try {
             StringBuilder sb = new StringBuilder("INSERT INTO " + tableName + " (")
                     .append(getColumnsAsString())
-                    .append(") VALUES (");
-
-            for (int j = 1; j < fields.size(); j++) {
-                if (j > 1) {
-                    sb.append(",");
-                }
-                sb.append("?");
-            }
-            sb.append(")");
+                    .append(") VALUES (")
+                    .append(getCommaSeparatedParams(fields.size()))
+                    .append(")");
 
             try (Connection con = ds.getConnection()) {
                 try (PreparedStatement ps = con.prepareStatement(sb.toString())) {
@@ -292,6 +286,7 @@ public abstract class FastDAO<E extends FastEntity> {
 
             boolean generateKey = true;
 
+
             int k = 0, fc = 0;
             for (Field field : fields.values()) {
                 String colName = getFwMapping(field.getName());
@@ -314,13 +309,10 @@ public abstract class FastDAO<E extends FastEntity> {
             }
 
             sb.append(") VALUES (");
-            for (int j = 0; j < fc; j++) {
-                if (j > 0) {
-                    sb.append(",");
-                }
-                sb.append("?");
+            if (!generateKey) {
+                sb.append("?,");
             }
-            sb.append(")");
+            sb.append(getCommaSeparatedParams(fields.size())).append(")");
 
             Object key;
             Field keyField;
@@ -366,6 +358,7 @@ public abstract class FastDAO<E extends FastEntity> {
             throw new FastDAOException("insert - single", e);
         }
     }
+
 
     /**
      * Update a list of &lt;E&gt; instances matched by their primary key values
@@ -449,19 +442,13 @@ public abstract class FastDAO<E extends FastEntity> {
             return updateQuery;
         }
 
-        StringBuilder query = new StringBuilder("UPDATE " + tableName + " SET (")
-                .append(getColumnsAsString())
-                .append(") = (");
+        updateQuery = "UPDATE " + tableName + " SET (" +
+                getColumnsAsString() +
+                ") = (" +
+                getCommaSeparatedParams(fields.size()) +
+                ") WHERE " + pkName + "=?";
 
-        for (int j = 1; j < fields.size(); j++) {
-            if (j > 1) {
-                query.append(",");
-            }
-            query.append("?");
-        }
-        query.append(") WHERE ").append(pkName).append("=?");
-
-        return updateQuery = query.toString();
+        return updateQuery;
     }
 
     /**
@@ -489,6 +476,22 @@ public abstract class FastDAO<E extends FastEntity> {
     }
 
     /**
+     * Return comma separated parameters/placeholders
+     *
+     * @param count parameters count
+     * @return comma separated parameters
+     */
+    private String getCommaSeparatedParams(int count) {
+        StringBuilder sb = new StringBuilder("?");
+        for (int j = 2; j < count; j++) {
+            sb.append(",");
+            sb.append("?");
+        }
+
+        return sb.toString();
+    }
+
+    /**
      * Delete a list of &lt;E&gt; instances matching by their primary key values
      *
      * @param objects &lt;E&gt; instances
@@ -503,12 +506,7 @@ public abstract class FastDAO<E extends FastEntity> {
                     + " IN (");
 
             int size = objects.size();
-            for (int i = 0; i < size; i++) {
-                if (i > 0) {
-                    sb.append(",");
-                }
-                sb.append("?");
-            }
+            getCommaSeparatedParams(size);
 
             sb.append(")");
 

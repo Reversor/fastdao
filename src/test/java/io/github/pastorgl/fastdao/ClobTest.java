@@ -17,6 +17,8 @@ public class ClobTest {
             TestEntity created = new TestEntity();
             transaction.insert(created);
 
+            transaction.update(created);
+
             transaction.commit();
         } catch (Exception e) {
             e.printStackTrace();
@@ -56,7 +58,7 @@ public class ClobTest {
             }
 
             @Override
-            protected Object insert(TestEntity object) {
+            public Object insert(TestEntity object) {
                 return super.insert(object);
             }
 
